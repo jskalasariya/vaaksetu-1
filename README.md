@@ -136,6 +136,28 @@ ffprobe (metadata / duration) ──► ffmpeg (extract 16kHz mono WAV)
 - **ffmpeg** installed and available in `PATH`
 - **Git**
 
+#### Windows IndicTrans2 prerequisite
+
+Windows installs can use the NLLB fallback without a C++ compiler. To enable
+IndicTrans2, install the MSVC workload from an **elevated PowerShell**. This
+command intentionally omits `--wait`, which is unsupported by recent Visual
+Studio installers:
+
+```powershell
+$vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+& $vsInstaller modify --installPath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive --norestart
+```
+
+Then open a developer PowerShell and install the native processor in the
+project virtual environment:
+
+```powershell
+& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+.\.venv\Scripts\Activate.ps1
+python -m pip install IndicTransToolkit
+python -c "from IndicTransToolkit.processor import IndicProcessor; print('IndicTransToolkit OK')"
+```
+
 ### 2. Installation
 
 ```bash
@@ -224,6 +246,7 @@ For complete hardware sizing, GPU requirements, and step-by-step setup, see [doc
 ## 📚 Project Documentation
 
 - 📖 **[Startup Guide & User Manual](docs/STARTUP_GUIDE.md)**: Complete step-by-step instructions for running the app end-to-end.
+- 🪟 **[Windows Setup Guide](docs/WINDOWS_SETUP.md)**: Dedicated Windows installation, MSVC/IndicTrans2 setup, model download, database, and offline deployment steps.
 - 📐 **[Architecture Guide](docs/ARCHITECTURE.md)**: DDD breakdown, engine contracts, and domain layers.
 - 🚀 **[Deployment Guide](docs/DEPLOYMENT.md)**: On-premises hardware requirements, offline model setup, and production hardening.
 - 📦 **[Desktop Build Guide](docs/BUILD.md)**: Compiling and packaging standalone desktop binaries (`.exe` / `.dmg`).

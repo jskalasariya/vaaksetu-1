@@ -306,7 +306,11 @@ class TranslationManager:
             from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
             # ── 1. IndicTrans2 — Priority: Distilled 200M/320M ➔ 1B ──
-            candidates = self._get_indictrans_candidates(src_key, tgt_key)
+            candidates = (
+                self._get_indictrans_candidates(src_key, tgt_key)
+                if self.processor is not None
+                else []
+            )
 
             for it_name in candidates:
                 if it_name in self.models:

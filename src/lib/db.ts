@@ -8,10 +8,10 @@ const getDatabaseUrl = (): string => {
     if (path.isAbsolute(rawPath)) {
       return envUrl;
     }
-    // Convert relative path to absolute path relative to process.cwd()
-    return `file:${path.resolve(process.cwd(), rawPath)}`;
+    // Prisma resolves relative SQLite URLs from the schema directory.
+    return `file:${path.resolve(process.cwd(), 'prisma', rawPath)}`;
   }
-  return `file:${path.resolve(process.cwd(), 'db/custom.db')}`;
+  return `file:${path.resolve(process.cwd(), 'prisma', 'db/custom.db')}`;
 };
 
 const globalForPrisma = globalThis as unknown as {

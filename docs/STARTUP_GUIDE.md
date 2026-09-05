@@ -2,6 +2,9 @@
 
 Welcome to **VaakSetu**! This guide takes you step-by-step from cloning the repository to running the full product locally, including the Next.js web application and the high-performance local AI engine.
 
+For a Windows-only setup with exact PowerShell commands, see the dedicated
+[Windows Setup Guide](WINDOWS_SETUP.md).
+
 ---
 
 ## 📋 System Prerequisites
@@ -14,6 +17,61 @@ Before starting, ensure you have the following installed on your machine:
 | **Python** | Python 3.10 – 3.12 | `python3 --version` or `py -V` |
 | **FFmpeg** | FFmpeg 5.x+ | `ffmpeg -version` |
 | **Git** | Any recent version | `git --version` |
+
+### Windows prerequisites
+
+Open **PowerShell** and install Python 3.12 with `winget`:
+
+```powershell
+winget install Python.Python.3.12 --version 3.12.0
+winget install Gyan.FFmpeg
+winget install Microsoft.VCRedist.2015+.x64
+```
+
+The Visual C++ Redistributable is required at runtime by PyTorch. Restart
+PowerShell after these installs so the updated `PATH` is visible.
+
+The standard Windows dependency install does not require Visual Studio C++:
+`IndicTransToolkit` is skipped and the service uses the NLLB translation
+fallback. To enable the higher-quality IndicTrans2 path, install Visual Studio
+Build Tools and select the **Desktop development with C++** workload:
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools
+```
+
+If Build Tools is already installed without that workload, run this command in
+an **elevated PowerShell** (Run as Administrator). The `--wait` option must not
+be added; this Visual Studio Installer version does not support it:
+
+```powershell
+$vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+& $vsInstaller modify --installPath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive --norestart
+```
+
+This workload provides MSVC 14+ and the Windows SDK required to build
+`IndicTransToolkit`. Close that window and open an **x64 Native Tools PowerShell
+for VS 2022** (or launch the developer shell manually), then install the
+optional processor from the activated virtual environment:
+
+```powershell
+& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+.\.venv\Scripts\Activate.ps1
+python -m pip install IndicTransToolkit
+```
+
+Close and reopen PowerShell, then verify the installations:
+
+```powershell
+py -3.12 --version
+python --version
+where.exe cl.exe
+python -c "from IndicTransToolkit.processor import IndicProcessor; print('IndicTransToolkit OK')"
+```
+
+The expected Python version is `3.12.x`, and `where.exe cl.exe` should return
+an MSVC compiler path. If `python` still resolves to a different installation,
+use `py -3.12` in the commands below.
 
 > [!TIP]
 > **FFmpeg Quick Install:**
@@ -87,22 +145,29 @@ bun run dev        # or npm run dev
 
 The local AI microservice handles neural translation (IndicTrans2), Whisper speech-to-text, neural TTS voice synthesis, and video dubbing.
 
-1. Create and activate a Python virtual environment:
-   ```bash
-   # In the project root or mini-services directory:
-   python3 -m venv venv
+1. Create and activate a Python virtual environment.
 
-   # Activate virtual environment:
-   # macOS / Linux:
-   source venv/bin/activate
-   # Windows (PowerShell):
+   On Windows PowerShell:
+   ```powershell
+   py -3.12 -m venv venv
    .\venv\Scripts\Activate.ps1
+   python --version
+   ```
+
+   On macOS/Linux:
+   ```bash
+   python3 -m venv venv
    ```
 
 2. Install Python dependencies:
-   ```bash
-   pip install -r mini-services/requirements.txt
+   ```powershell
+   python -m pip install -r mini-services/requirements.txt
    ```
+
+   On Windows this command intentionally skips `IndicTransToolkit`, so it does
+   not require a C++ compiler. The service will report that the processor is
+   unavailable and use the NLLB fallback. If the optional processor was
+   installed, verify it with `python -c "from IndicTransToolkit.processor import IndicProcessor; print('ok')"`.
 
 3. Launch the AI microservice:
    ```bash
@@ -113,30 +178,51 @@ The local AI microservice handles neural translation (IndicTrans2), Whisper spee
 4. Verify health check:
    Open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) in your browser. You should see a JSON response showing system device (`mps`, `cuda`, or `cpu`) and available models.
 
----
+### Download models for offline use
+
+Download all translation and transcription models used by the local service on
+an internet-connected machine:
+
+python scripts/download-models.py
+```
+
+The script stores them in the standard Hugging Face cache:
+
+```text
+%USERPROFILE%\.cache\huggingface\hub
+```
+
+To stage the cache directly on a USB drive:
+
+```powershell
+python scripts/download-models.py --cache-dir E:\vaaksetu-model-cache
+```
+
+Copy that cache to the target laptop's `%USERPROFILE%\.cache\huggingface\hub`.
+For a custom location, set `HUGGINGFACE_HUB_CACHE` to the exact cache directory
+before starting the local AI service, for example:
+
+running the command again.
+Download only selected groups when USB space is limited:
+
+```powershell
+python scripts/download-models.py --model whisper --model nllb
+The current TTS implementation uses Edge TTS and gTTS, which require network
+access. Model caching alone does not make translated voice generation offline.
 
 ### Step 3: Set Up the Next.js Frontend & Database
-
 1. In a new terminal, install frontend dependencies:
    ```bash
    bun install
-   # or: npm install
    ```
 
 2. Initialize the SQLite database schema:
    ```bash
    bun run db:push
-   # or: npx prisma db push
-   ```
 
-3. Start the Next.js development server:
    ```bash
    bun run dev
    # or: npm run dev
-   ```
-
-4. Open your browser and go to:
-   ```
    http://localhost:3000
    ```
 
