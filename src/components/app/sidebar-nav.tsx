@@ -21,6 +21,7 @@ import { useAppStore, type ViewId } from "./app-store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
+import { uiText } from "@/lib/ui-language";
 
 interface NavItem {
   id: ViewId;
@@ -45,7 +46,7 @@ const NAV: NavItem[] = [
 ];
 
 export function SidebarNav() {
-  const { activeView, setView, sidebarOpen, setSidebarOpen } = useAppStore();
+  const { activeView, setView, sidebarOpen, setSidebarOpen, uiLanguage } = useAppStore();
   const groups = ["Workspace", "Tools"] as const;
 
   return (
@@ -111,7 +112,7 @@ export function SidebarNav() {
                       )}
                     >
                       <Icon className={cn("h-4 w-4 shrink-0", active ? "" : "text-muted-foreground group-hover:text-sidebar-accent-foreground")} />
-                      <span className="flex-1 text-left">{item.label}</span>
+                      <span className="flex-1 text-left">{uiText(uiLanguage, item.label)}</span>
                       <span className={cn("text-[10px] devanagari", active ? "text-sidebar-primary-foreground/70" : "text-muted-foreground/70")}>
                         {item.native}
                       </span>

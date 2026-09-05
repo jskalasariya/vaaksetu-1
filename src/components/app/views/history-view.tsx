@@ -389,6 +389,7 @@ const JobDetailDialog = ({
   const hasAnyOutput = job && (
     job.outputAudio || job.outputSrt || job.outputVtt || job.outputText || job.summary
   );
+  const mediaVideoName = job?.inputPath ? `source_${basename(job.inputPath)}` : null;
   return (
     <Dialog open={!!job} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-2xl">
@@ -438,6 +439,22 @@ const JobDetailDialog = ({
               {job.transcript && <Section label="Transcript (ASR)">{job.transcript}</Section>}
               {job.outputText && <Section label="Translated output">{job.outputText}</Section>}
               {job.summary && <Section label="Summary">{job.summary}</Section>}
+
+              {job.kind === "media" && job.status === "completed" && job.inputName && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Recorded video
+                  </p>
+                  <video
+                    controls
+                    preload="metadata"
+                    className="aspect-video w-full rounded-lg border bg-black"
+                    src={mediaVideoName ? `/api/download/${job.id}/${mediaVideoName}` : undefined}
+                  >
+                    Your browser does not support video playback.
+                  </video>
+                </div>
+              )}
 
               {/* Side-by-side comparison (only when both source + output exist) */}
               {job.inputText && job.outputText && <CompareView job={job} />}

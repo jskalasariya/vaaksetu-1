@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { UiLanguage } from "@/lib/ui-language";
 
 export type ViewId =
   | "dashboard"
@@ -28,6 +29,8 @@ interface AppState {
   /** Whether model auto-select is enabled (vs manual). */
   autoModel: boolean;
   setAutoModel: (v: boolean) => void;
+  uiLanguage: UiLanguage;
+  setUiLanguage: (language: UiLanguage) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (v: boolean) => void;
 }
@@ -41,6 +44,8 @@ export const useAppStore = create<AppState>((set) => ({
   setDefaultTargetLang: (defaultTargetLang) => set({ defaultTargetLang }),
   autoModel: true,
   setAutoModel: (autoModel) => set({ autoModel }),
+  uiLanguage: "en",
+  setUiLanguage: (uiLanguage) => set({ uiLanguage }),
   sidebarOpen: false,
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 }));

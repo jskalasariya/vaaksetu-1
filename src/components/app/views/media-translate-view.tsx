@@ -122,6 +122,50 @@ const downloadUrl = (url: string, filename: string) => {
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() ?? p;
 
+interface PersistedMediaJob {
+  id: string;
+  kind: string;
+  status: string;
+  sourceLang: string;
+  targetLang: string;
+  inputName: string | null;
+  inputMime: string | null;
+  inputPath: string | null;
+  transcript: string | null;
+  outputText: string | null;
+  outputAudio: string | null;
+  outputSrt: string | null;
+  outputVtt: string | null;
+  model: string | null;
+  modelReason: string | null;
+  durationSec: number | null;
+  error: string | null;
+}
+
+const persistedJobToResult = (job: PersistedMediaJob): MediaResult | null => {
+  if (job.kind !== "media") return null;
+  const inputName = job.inputPath ? `source_${basename(job.inputPath)}` : undefined;
+  const isVideo = Boolean(job.inputMime?.startsWith("video/") || job.inputName?.match(/\.(mp4|mkv|mov|webm|avi)$/i));
+  const originalBase = job.inputName ? job.inputName.replace(/\.[^.]+$/, "") : "media";
+  const hasDubbedVideo = isVideo && Boolean(job.outputAudio);
+  return {
+    transcript: job.transcript ?? "",
+    translatedText: job.outputText ?? "",
+    segments: [],
+    sourceSegments: [],
+    outputAudioPath: job.outputAudio ?? undefined,
+    outputSrt: job.outputSrt ?? undefined,
+    outputVtt: job.outputVtt ?? undefined,
+    inputVideoName: inputName,
+    dubbedVideoName: hasDubbedVideo ? `${originalBase}.${job.targetLang}.dubbed.mp4` : undefined,
+    hasVideo: isVideo,
+    model: job.model ?? "local",
+    modelReason: job.modelReason ?? "Restored from job history",
+    durationSec: job.durationSec ?? undefined,
+    jobId: job.id,
+  };
+};
+
 /** Selected file summary card. */
 const FileChip = ({ file, onRemove }: { file: File; onRemove: () => void }) => {
   const ext = getExt(file.name);
@@ -310,6 +354,45 @@ export function MediaTranslateView() {
   const [result, setResult] = useState<MediaResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+
+  // Rehydrate the latest media job so navigation and browser refresh do not lose the result.
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const restoreLatest = async () => {
+      try {
+        const response = await fetch("/api/jobs?kind=media&limit=1", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as { jobs?: PersistedMediaJob[] };
+        const job = data.jobs?.[0];
+        if (!active || !job) return;
+        if (job.status === "running" || job.status === "queued") {
+          setLoading(true);
+          setError(null);
+        } else if (job.status === "completed") {
+          const restored = persistedJobToResult(job);
+          if (restored) {
+            setResult(restored);
+            setLoading(false);
+            setError(null);
+          }
+        } else if (job.status === "failed") {
+          setLoading(false);
+          setError(job.error ?? "Media translation failed.");
+        }
+        if (active && (job.status === "running" || job.status === "queued")) {
+          timer = setTimeout(restoreLatest, 3000);
+        }
+      } catch {
+        // The in-memory UI remains usable if history is temporarily unavailable.
+      }
+    };
+    void restoreLatest();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   // Progress tick while loading.
   useEffect(() => {

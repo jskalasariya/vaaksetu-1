@@ -20,6 +20,7 @@ import { ShortcutsHelp } from "./shortcuts-help";
 import { useKeyboardShortcuts } from "./use-keyboard-shortcuts";
 import { ThemeToggle } from "./theme-toggle";
 import { AiModeToggle } from "./ai-mode-toggle";
+import { UiLanguageSelect } from "./ui-language-select";
 import { DashboardView } from "./views/dashboard-view";
 import { TextTranslateView } from "./views/text-translate-view";
 import { BatchTranslateView } from "./views/batch-translate-view";
@@ -45,7 +46,7 @@ const PRIMARY_MODES: { id: ViewId; label: string; native: string; icon: typeof L
 ];
 
 export function AppShell() {
-  const { activeView, setView } = useAppStore();
+  const { activeView, setView, uiLanguage } = useAppStore();
   useKeyboardShortcuts();
 
   return (
@@ -97,6 +98,8 @@ export function AppShell() {
 
             <AiModeToggle />
 
+            <UiLanguageSelect />
+
             <Button
               variant="ghost"
               size="icon"
@@ -129,7 +132,7 @@ export function AppShell() {
                   )}
                 >
                   <Icon className="h-4 w-4" />
-                  <span>{mode.label}</span>
+                  <span>{uiLanguage === "mr" ? mode.native : uiLanguage === "hi" ? ({ Text: "पाठ", Video: "वीडियो", Audio: "ऑडियो", Documents: "दस्तावेज़", Convert: "रूपांतरण" } as Record<string, string>)[mode.label] : mode.label}</span>
                 </button>
               );
             })}
