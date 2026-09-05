@@ -129,6 +129,7 @@ bun run dev        # or npm run dev
 
    # Local AI Microservice URL (Default: http://127.0.0.1:8000)
    LOCAL_AI_URL="http://127.0.0.1:8000"
+   AI_MODE="local"
 
    # Compute device: auto (recommended), cuda, or cpu
    VAAKSETU_DEVICE="auto"

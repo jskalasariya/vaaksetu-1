@@ -20,6 +20,7 @@ import {
   LocalTranscriptionEngine,
   LocalTtsEngine,
 } from "./local-adapter";
+import { getAiMode, remoteCredentials } from "./ai-mode";
 import type {
 
   TranslationRequest,
@@ -255,8 +256,30 @@ export const BhashiniTranslationEngine: TranslationEngine = {
     const { text, sourceLang, targetLang } = request;
     const sLang = sourceLang === "auto" ? "hi" : sourceLang;
     const tLang = targetLang;
+    const mode = await getAiMode();
 
-    // 1. PRIMARY: Local AI Engine (IndicTrans2 / NLLB — fully offline, no API keys)
+    if (mode === "remote") {
+      const credentials = remoteCredentials();
+      if (!credentials.bhashini && !credentials.gemini && !credentials.hf) {
+        console.warn("[AI mode] Remote selected but no remote credentials are configured; falling back to local translation.");
+      } else {
+        const remoteResult = await translateViaBhashini(text, sLang, tLang);
+        if (remoteResult) {
+          return { text: remoteResult, model: "indictrans2", modelReason: "AI4Bharat IndicTrans2 via Bhashini (remote).", detectedSourceLang: sourceLang === "auto" ? sLang : sourceLang };
+        }
+        const hfResult = await translateViaHuggingFace(text, sLang, tLang);
+        if (hfResult) {
+          return { text: hfResult, model: "indictrans2", modelReason: "AI4Bharat IndicTrans2 via Hugging Face (remote).", detectedSourceLang: sourceLang === "auto" ? sLang : sourceLang };
+        }
+        const geminiResult = await translateViaGemini(text, sourceLang, targetLang);
+        if (!geminiResult.startsWith("[IndicTrans2:")) {
+          return { text: geminiResult, model: "remote-llm", modelReason: "Remote Gemini translation.", detectedSourceLang: sourceLang === "auto" ? sLang : sourceLang };
+        }
+        console.warn("[AI mode] Remote translation providers failed; falling back to local translation.");
+      }
+    }
+
+    // Local mode is the default and is also the fallback when remote mode is unavailable.
     //    This is the core engine for NGO deployment. No internet required.
     try {
       const localRes = await LocalTranslationEngine.translate(request);
@@ -267,7 +290,12 @@ export const BhashiniTranslationEngine: TranslationEngine = {
       // Local AI not running, proceed to optional online fallbacks
     }
 
-    // ── Optional online fallbacks (only used if local AI is not available) ──
+    if (mode === "local") {
+      throw new Error("Local translation failed and AI mode is local.");
+    }
+
+    // Remote mode has already attempted all configured providers above.
+    // Keep the legacy fallback chain for compatibility with transient local failures.
 
     // 2. Try Bhashini / AI4Bharat Dhruva API (free, requires signup)
     const bhashiniRes = await translateViaBhashini(text, sLang, tLang);
@@ -359,6 +387,39 @@ export const BhashiniTranscriptionEngine: TranscriptionEngine = {
     modelId?: string,
   ): Promise<TranscriptionResult> {
     const lang = language && language !== "auto" ? language : "hi";
+    const mode = await getAiMode();
+
+    if (mode === "remote") {
+      const credentials = remoteCredentials();
+      if (!credentials.bhashini && !credentials.gemini) {
+        console.warn("[AI mode] Remote selected but no Bhashini/Gemini credentials are configured; falling back to local transcription.");
+      } else {
+        const buffer = await fs.readFile(audioPath);
+        const base64 = buffer.toString("base64");
+        const remoteText = await transcribeViaBhashini(base64, lang);
+        if (remoteText) {
+          return { text: remoteText, segments: buildSegments(remoteText), detectedLanguage: lang, model: "remote-bhashini" };
+        }
+        const apiKey = getGeminiApiKey();
+        if (apiKey) {
+          try {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ contents: [{ parts: [{ inlineData: { mimeType: "audio/wav", data: base64 } }, { text: `Transcribe this audio in ${languageLabel(lang)}. Output only the transcript.` }] }] }),
+              signal: AbortSignal.timeout(60000),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              const remoteTranscript = json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("").trim();
+              if (remoteTranscript) return { text: remoteTranscript, segments: buildSegments(remoteTranscript), detectedLanguage: lang, model: "remote-gemini" };
+            }
+          } catch (error) {
+            console.warn(`[AI mode] Remote transcription failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        console.warn("[AI mode] Remote transcription providers failed; falling back to local transcription.");
+      }
+    }
 
     // 1. PRIMARY: Local Whisper ASR (faster-whisper on local machine)
     let localError = "local AI request failed";
@@ -370,6 +431,10 @@ export const BhashiniTranscriptionEngine: TranscriptionEngine = {
     } catch (localErr: any) {
       localError = localErr?.message || String(localErr);
       console.warn(`[Transcription] Local Whisper ASR notice: ${localErr?.message || localErr}`);
+    }
+
+    if (mode === "local") {
+      throw new Error(`Local transcription failed: ${localError}`);
     }
 
     const buffer = await fs.readFile(audioPath);
@@ -489,7 +554,19 @@ async function synthesizeViaBhashini(text: string, language: string): Promise<Bu
 
 export const BhashiniTtsEngine: TtsEngine = {
   async synthesize(text: string, language: string): Promise<Buffer> {
-    // 1. Try Local Neural TTS (Edge TTS with Marathi, Hindi, English neural voices)
+    const mode = await getAiMode();
+
+    if (mode === "remote") {
+      const remoteAudio = await synthesizeViaBhashini(text, language);
+      if (remoteAudio) return remoteAudio;
+      if (!remoteCredentials().bhashini && !remoteCredentials().gemini) {
+        console.warn("[AI mode] Remote selected but no remote TTS credentials are configured; falling back to local TTS.");
+      } else {
+        console.warn("[AI mode] Remote TTS failed; falling back to local TTS.");
+      }
+    }
+
+    // Local mode is the default and is also the fallback for remote mode.
     try {
       const localAudio = await LocalTtsEngine.synthesize(text, language);
       if (localAudio && localAudio.length > 0) {
@@ -497,6 +574,11 @@ export const BhashiniTtsEngine: TtsEngine = {
       }
     } catch {
       // Local AI not running or busy, proceed to fallbacks
+    }
+
+    if (mode === "local") {
+      console.warn("[AI mode] Local TTS failed; returning silence because remote mode is disabled.");
+      return createSilentWavBuffer(2.0);
     }
 
     // 2. Try Bhashini IndicTTS
@@ -539,7 +621,9 @@ export const BhashiniTtsEngine: TtsEngine = {
 
 export const BhashiniLlmEngine: LlmEngine = {
   async complete(messages: LlmMessage[], opts): Promise<string> {
-    const apiKey = getGeminiApiKey();
+    const mode = await getAiMode();
+    const apiKey = mode === "remote" ? getGeminiApiKey() : "";
+    if (mode === "remote" && !apiKey) console.warn("[AI mode] Remote selected but GEMINI_API_KEY is missing; using local fallback response.");
     if (apiKey) {
       const contents = messages.map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
@@ -568,7 +652,9 @@ export const BhashiniLlmEngine: LlmEngine = {
   async answerWithContext(context: string, question: string, replyLang: string): Promise<string> {
     const tgt = LANGUAGES[replyLang as "mr" | "hi" | "en"];
     const langInstruction = tgt ? `Reply in ${tgt.name} (${tgt.nativeName}). ` : "";
-    const apiKey = getGeminiApiKey();
+    const mode = await getAiMode();
+    const apiKey = mode === "remote" ? getGeminiApiKey() : "";
+    if (mode === "remote" && !apiKey) console.warn("[AI mode] Remote selected but GEMINI_API_KEY is missing; using local fallback response.");
 
     if (apiKey) {
       const prompt =
@@ -607,7 +693,9 @@ export const BhashiniLlmEngine: LlmEngine = {
         ? `as ${sizeMap[opts.length]} concise bullet points (use "- " prefixes)`
         : `as a single ${sizeMap[opts.length]}-sentence paragraph`;
     const langInstruction = tgt ? `Write the summary in ${tgt.name} (${tgt.nativeName}). ` : "";
-    const apiKey = getGeminiApiKey();
+    const mode = await getAiMode();
+    const apiKey = mode === "remote" ? getGeminiApiKey() : "";
+    if (mode === "remote" && !apiKey) console.warn("[AI mode] Remote selected but GEMINI_API_KEY is missing; using local fallback response.");
 
     if (apiKey) {
       const prompt =

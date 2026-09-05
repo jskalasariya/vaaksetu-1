@@ -26,6 +26,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { toast } from "sonner";
 
 interface Stats {
   totalJobs: number;
@@ -185,6 +187,72 @@ const PreferencesCard = () => {
   );
 };
 
+const AiModeCard = () => {
+  const [mode, setMode] = useState<"local" | "remote">("local");
+  const [credentials, setCredentials] = useState({ bhashini: false, gemini: false, hf: false });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings/ai-mode")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.mode === "local" || data.mode === "remote") setMode(data.mode);
+        if (data.credentials) setCredentials(data.credentials);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const updateMode = async (nextMode: "local" | "remote") => {
+    setMode(nextMode);
+    setSaving(true);
+    try {
+      const response = await fetch("/api/settings/ai-mode", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: nextMode }),
+      });
+      if (!response.ok) throw new Error("Could not save AI mode");
+      const data = await response.json();
+      setCredentials(data.credentials ?? credentials);
+      toast.success(`${nextMode === "local" ? "Local" : "Remote"} AI mode selected`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save AI mode");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remoteReady = credentials.bhashini || credentials.gemini || credentials.hf;
+
+  return (
+    <Card className={mode === "remote" && !remoteReady ? "border-amber-500/50" : undefined}>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Cpu className="h-4 w-4 text-primary" /> AI execution mode
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <RadioGroup value={mode} onValueChange={(value) => void updateMode(value as "local" | "remote")} className="grid gap-3 sm:grid-cols-2">
+          <Label htmlFor="ai-mode-local" className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+            <RadioGroupItem id="ai-mode-local" value="local" />
+            <span><span className="block text-sm font-medium">Local / offline</span><span className="text-[11px] text-muted-foreground">Use the local AI service and system RAM.</span></span>
+          </Label>
+          <Label htmlFor="ai-mode-remote" className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+            <RadioGroupItem id="ai-mode-remote" value="remote" />
+            <span><span className="block text-sm font-medium">Remote APIs</span><span className="text-[11px] text-muted-foreground">Use configured Bhashini, Gemini, or Hugging Face APIs first.</span></span>
+          </Label>
+        </RadioGroup>
+        {mode === "remote" && !remoteReady && (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-200">
+            Remote mode is selected, but no remote credentials are configured. Requests will be logged and fall back to local AI.
+          </p>
+        )}
+        <p className="text-[11px] text-muted-foreground">{saving ? "Saving…" : "Mode is stored in the local database."}</p>
+      </CardContent>
+    </Card>
+  );
+};
+
 const DeploymentCard = () => (
   <Card>
     <CardHeader className="pb-3">
@@ -276,6 +344,8 @@ export function SettingsView() {
         <PreferencesCard />
         <DeploymentCard />
       </div>
+
+      <AiModeCard />
 
       <AboutCard />
 

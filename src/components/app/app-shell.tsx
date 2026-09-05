@@ -19,6 +19,7 @@ import { CommandPalette } from "./command-palette";
 import { ShortcutsHelp } from "./shortcuts-help";
 import { useKeyboardShortcuts } from "./use-keyboard-shortcuts";
 import { ThemeToggle } from "./theme-toggle";
+import { AiModeToggle } from "./ai-mode-toggle";
 import { DashboardView } from "./views/dashboard-view";
 import { TextTranslateView } from "./views/text-translate-view";
 import { BatchTranslateView } from "./views/batch-translate-view";
@@ -93,6 +94,8 @@ export function AppShell() {
             >
               <Search className="h-4 w-4" />
             </Button>
+
+            <AiModeToggle />
 
             <Button
               variant="ghost"

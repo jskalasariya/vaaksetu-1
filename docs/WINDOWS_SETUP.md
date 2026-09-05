@@ -180,8 +180,14 @@ For local operation, these values are sufficient:
 ```env
 DATABASE_URL="file:./db/custom.db"
 LOCAL_AI_URL="http://127.0.0.1:8000"
+AI_MODE="local"
 HF_TOKEN=""
 ```
+
+The Settings page also provides an **AI execution mode** switch. `local` uses
+the local AI service and system RAM. `remote` tries configured Bhashini,
+Gemini, or Hugging Face APIs first; when credentials are missing or a remote
+request fails, the event is logged and the request falls back to local AI.
 
 A Hugging Face token is only needed for gated model downloads. Do not commit a
 real token to the repository.
