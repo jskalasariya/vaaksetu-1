@@ -361,12 +361,14 @@ export const BhashiniTranscriptionEngine: TranscriptionEngine = {
     const lang = language && language !== "auto" ? language : "hi";
 
     // 1. PRIMARY: Local Whisper ASR (faster-whisper on local machine)
+    let localError = "local AI request failed";
     try {
       const localRes = await LocalTranscriptionEngine.transcribe(audioPath, language, modelId);
       if (localRes?.text && localRes.text.trim()) {
         return localRes;
       }
     } catch (localErr: any) {
+      localError = localErr?.message || String(localErr);
       console.warn(`[Transcription] Local Whisper ASR notice: ${localErr?.message || localErr}`);
     }
 
@@ -427,7 +429,8 @@ export const BhashiniTranscriptionEngine: TranscriptionEngine = {
     }
 
     throw new Error(
-      "Speech transcription failed. Please ensure the local AI service is running on port 8000 (`./scripts/start-local-ai.sh`)."
+      `Speech transcription failed. Local AI error: ${localError}. ` +
+      "Please ensure the local AI service is running on port 8000 (Windows: `./scripts/start-local-ai.ps1`)."
     );
   },
 };

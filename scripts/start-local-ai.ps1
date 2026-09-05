@@ -73,6 +73,10 @@ if (-not $Python) {
 Write-Host "[OK] Using Python: $Python" -ForegroundColor Green
 & $Python --version
 
+# ── Report compute capability before starting ─────────────────
+$compute = & $Python -c "import torch; print('cuda_available=' + str(torch.cuda.is_available()).lower()); print('cuda_version=' + str(torch.version.cuda)); print('gpu=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'))"
+$compute | ForEach-Object { Write-Host "[Compute] $_" -ForegroundColor Cyan }
+
 # ── Validate critical dependencies ────────────────────────────
 Write-Host "[Check] Validating dependencies..." -ForegroundColor Yellow
 $depsOk = & $Python -c "import fastapi, torch, faster_whisper; print('ok')" 2>$null

@@ -115,6 +115,19 @@ def main():
     except Exception:
         pass
 
+    compute = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "import torch; print('cuda_available=' + str(torch.cuda.is_available()).lower()); print('cuda_version=' + str(torch.version.cuda)); print('gpu=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'))",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if compute.returncode == 0:
+        for line in compute.stdout.strip().splitlines():
+            print(f"[Compute] {line}")
+
     # ── Validate service file ──────────────────────────────────
     if not SERVICE_FILE.is_file():
         print(f"[ERROR] Service file not found: {SERVICE_FILE}")

@@ -37,6 +37,36 @@ MODEL_GROUPS = {
     ],
 }
 
+MODEL_REQUIRED_FILES = {
+    "indictrans": {"config.json", "tokenizer_config.json"},
+    "nllb": {"config.json", "tokenizer_config.json"},
+    "whisper": {"config.json", "model.bin"},
+}
+MODEL_WEIGHT_PREFIXES = {
+    "indictrans": ("model.safetensors", "pytorch_model.bin"),
+    "nllb": ("model.safetensors", "pytorch_model.bin"),
+    "whisper": ("model.bin",),
+}
+
+
+def validate_snapshot(snapshot_path: str, model_id: str) -> None:
+    """Reject metadata-only or otherwise incomplete model snapshots."""
+    snapshot = Path(snapshot_path)
+    files = {path.name for path in snapshot.rglob("*") if path.is_file()}
+    group = next(group for group, models in MODEL_GROUPS.items() if model_id in models)
+    missing = MODEL_REQUIRED_FILES[group] - files
+    has_weights = any(
+        name == prefix or name.startswith(f"{prefix}-")
+        for name in files
+        for prefix in MODEL_WEIGHT_PREFIXES[group]
+    )
+    if not has_weights:
+        missing.add("model weights")
+    if missing:
+        raise RuntimeError(
+            f"incomplete snapshot; missing required files: {', '.join(sorted(missing))}"
+        )
+
 
 def default_cache_dir() -> Path:
     """Return the Hugging Face hub cache used by transformers and faster-whisper."""
@@ -85,6 +115,7 @@ def download_models(model_ids: Iterable[str], cache_dir: Path, token: str | None
                 token=token or None,
                 resume_download=True,
             )
+            validate_snapshot(snapshot_path, model_id)
             print(f"[OK]    {snapshot_path}")
         except Exception as error:
             failed = True
@@ -105,6 +136,13 @@ def download_models(model_ids: Iterable[str], cache_dir: Path, token: str | None
 
 
 def main() -> int:
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:
+        pass
+
     parser = argparse.ArgumentParser(
         description="Download VaakSetu translation and transcription models."
     )

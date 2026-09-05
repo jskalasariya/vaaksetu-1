@@ -27,7 +27,51 @@ ffprobe -version
 
 Python should report `3.12.x`. Node.js should be version 20 or newer.
 
-## 2. Get the project
+## 2. Optional NVIDIA GPU setup
+
+The local service defaults to automatic device detection. On Windows, an
+NVIDIA GPU is used only when the NVIDIA driver and CUDA-enabled PyTorch are
+available. Check the driver first:
+
+```powershell
+nvidia-smi
+```
+
+Complete sections 3 through 6 first so `.venv` and the base dependencies exist.
+Then, from the project root, install the CUDA Python stack with the project
+script:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+.\scripts\install-windows-cuda.ps1 -CudaIndex cu121
+```
+
+The script installs the base dependencies, replaces CPU PyTorch with the
+selected CUDA wheel, installs CUDA libraries used by faster-whisper, and fails
+if PyTorch cannot see the GPU. Verify manually:
+
+```powershell
+python -c "import torch; print(torch.cuda.is_available()); print(torch.version.cuda); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no CUDA GPU')"
+```
+
+Use these `.env` settings for automatic selection:
+
+```env
+VAAKSETU_DEVICE="auto"
+VAAKSETU_GPU_INDEX="0"
+VAAKSETU_1B_VRAM_GB="6.0"
+VAAKSETU_MAX_LOADED_MODELS="1"
+```
+
+Set `VAAKSETU_DEVICE="cuda"` only after verification succeeds. It fails clearly
+if CUDA becomes unavailable instead of silently switching to CPU. Use
+`VAAKSETU_DEVICE="cpu"` for troubleshooting.
+
+The same settings are portable across macOS and Linux. On macOS, leave the
+device as `auto` so Apple Silicon can use MPS and Intel Macs use CPU. Whisper
+continues to use CPU on MPS because CTranslate2 does not support Apple MPS.
+
+## 3. Get the project
 
 ```powershell
 git clone <repository-url> VaakSetu
@@ -40,7 +84,7 @@ If the project is already present:
 Set-Location D:\projects\VaakSetu
 ```
 
-## 3. Install frontend dependencies
+## 4. Install frontend dependencies
 
 Use either npm or Bun. This guide uses npm because it is included with Node.js:
 
@@ -48,7 +92,7 @@ Use either npm or Bun. This guide uses npm because it is included with Node.js:
 npm install
 ```
 
-## 4. Create the Python environment
+## 5. Create the Python environment
 
 Create and activate the virtual environment in the project root:
 
@@ -71,7 +115,7 @@ Then activate again:
 .\.venv\Scripts\Activate.ps1
 ```
 
-## 5. Install Python dependencies
+## 6. Install Python dependencies
 
 ```powershell
 python -m pip install -r .\mini-services\requirements.txt
@@ -83,9 +127,9 @@ it contains a native Cython extension. The service can run with the NLLB fallbac
 without the toolkit. The next section enables the higher-quality IndicTrans2
 path.
 
-## 6. Enable IndicTrans2 on Windows
+## 7. Enable IndicTrans2 on Windows
 
-### 6.1 Install the MSVC C++ workload
+### 7.1 Install the MSVC C++ workload
 
 Open a new **PowerShell as Administrator** and run this exact command:
 
@@ -105,7 +149,7 @@ winget install Microsoft.VisualStudio.2022.BuildTools
 
 After the installer finishes, close the Administrator PowerShell.
 
-### 6.2 Install IndicTransToolkit
+### 7.2 Install IndicTransToolkit
 
 Open an **x64 Native Tools PowerShell for VS 2022**. Alternatively, launch the
 developer shell manually from a normal PowerShell:
@@ -123,7 +167,7 @@ python -c "from IndicTransToolkit.processor import IndicProcessor; print('IndicT
 C++ workload was not installed correctly; repeat section 6.1 from an elevated
 PowerShell.
 
-## 7. Configure environment variables
+## 8. Configure environment variables
 
 Create `.env` from the example if it does not exist:
 
@@ -142,7 +186,7 @@ HF_TOKEN=""
 A Hugging Face token is only needed for gated model downloads. Do not commit a
 real token to the repository.
 
-## 8. Initialize the database
+## 9. Initialize the database
 
 Run this from the project root:
 
@@ -161,7 +205,7 @@ D:\projects\VaakSetu\prisma\db\custom.db
 Do not use the empty root-level `db\custom.db` file. The application resolves
 Prisma's relative SQLite URL from the `prisma` schema directory.
 
-## 9. Download models while internet is available
+## 10. Download models while internet is available
 
 Activate the Python environment and run:
 
@@ -200,7 +244,7 @@ $env:HUGGINGFACE_HUB_CACHE = 'E:\vaaksetu-model-cache'
 Set this variable in every PowerShell session before starting the AI service, or
 copy the cache to `%USERPROFILE%\.cache\huggingface\hub`.
 
-## 10. Start the local AI service
+## 11. Start the local AI service
 
 Open PowerShell window 1:
 
@@ -219,7 +263,7 @@ Invoke-WebRequest http://127.0.0.1:8000/health -UseBasicParsing | Select-Object 
 The first request that uses Whisper or translation can take time while the model
 is loaded. The first model download must happen while internet is available.
 
-## 11. Start the web application
+## 12. Start the web application
 
 Open PowerShell window 2:
 
@@ -246,7 +290,7 @@ Expected result for a new database:
 {"jobs":[]}
 ```
 
-## 12. Offline laptop checklist
+## 13. Offline laptop checklist
 
 Before disconnecting the internet, confirm that these items are available:
 
@@ -317,3 +361,40 @@ Get-ChildItem $env:HUGGINGFACE_HUB_CACHE
 
 Ensure the relevant `models--...` directories are present before starting the
 service.
+
+### Text translation is slow or health shows NLLB
+
+Check the local service health response:
+
+```powershell
+(Invoke-WebRequest http://127.0.0.1:8000/health -UseBasicParsing).Content
+```
+
+For IndicTrans2, these fields should be true:
+
+```json
+"has_indictrans2": true,
+"has_processor": true
+```
+
+If `active_models` contains only `facebook/nllb-200-distilled-600M`, the
+IndicTrans2 cache is missing model weights or the service started before the
+toolkit was installed. While internet is available, rerun:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python .\scripts\download-models.py --model indictrans
+```
+
+The downloader reads `HF_TOKEN` from the project `.env`, resumes partial files,
+and now fails clearly if a repository contains only `README.md` and `LICENSE`.
+Restart the local AI service after the download:
+
+```powershell
+.\scripts\start-local-ai.ps1
+```
+
+The first translation after service startup includes model loading. Subsequent
+translations reuse the loaded model. CPU-only inference is slower than CUDA;
+for responsive text translation, use the distilled IndicTrans2 model and keep
+the local service running between requests.

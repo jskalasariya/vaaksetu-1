@@ -130,6 +130,10 @@ bun run dev        # or npm run dev
    # Local AI Microservice URL (Default: http://127.0.0.1:8000)
    LOCAL_AI_URL="http://127.0.0.1:8000"
 
+   # Compute device: auto (recommended), cuda, or cpu
+   VAAKSETU_DEVICE="auto"
+   VAAKSETU_GPU_INDEX="0"
+
    # Optional: Hugging Face Token (Needed only once if downloading gated Indic models)
    HF_TOKEN="hf_your_token_here"
 

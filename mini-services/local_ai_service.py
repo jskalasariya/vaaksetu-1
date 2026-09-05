@@ -14,6 +14,7 @@ No platform-exclusive hardcoding.
 """
 
 import gc
+import math
 import os
 import sys
 import types
@@ -25,6 +26,13 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
 
 # Enable MPS fallback to CPU for unsupported Metal kernels (prevents hard SIGABRT crashes)
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
@@ -83,21 +91,56 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 # Cross-Platform Device Detection & VRAM Profiling
 # ---------------------------------------------------------------------------
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+REQUESTED_DEVICE = os.environ.get("VAAKSETU_DEVICE", "auto").strip().lower()
+GPU_INDEX = _env_int("VAAKSETU_GPU_INDEX", 0)
+VRAM_1B_THRESHOLD_GB = float(os.environ.get("VAAKSETU_1B_VRAM_GB", "6.0"))
+MAX_LOADED_TRANSLATION_MODELS = _env_int("VAAKSETU_MAX_LOADED_MODELS", 2)
+
+
 def detect_device() -> Tuple[str, torch.dtype, float]:
     """
     Detect the optimal compute device with safe, cross-platform fallbacks.
     Returns (device_str, torch_dtype, vram_gb).
     MPS check is guarded to avoid AttributeError on non-Apple hardware.
     """
+    if REQUESTED_DEVICE not in {"auto", "cuda", "cpu"}:
+        raise RuntimeError(
+            "VAAKSETU_DEVICE must be one of: auto, cuda, cpu "
+            f"(received {REQUESTED_DEVICE!r})"
+        )
+
+    if REQUESTED_DEVICE == "cpu":
+        print("[Device] CPU forced by VAAKSETU_DEVICE=cpu")
+        return "cpu", torch.float32, 0.0
+
     # 1. NVIDIA CUDA (Float16 is natively supported across all matrix ops)
     if torch.cuda.is_available():
-        props = torch.cuda.get_device_properties(0)
+        if GPU_INDEX < 0 or GPU_INDEX >= torch.cuda.device_count():
+            raise RuntimeError(
+                f"VAAKSETU_GPU_INDEX={GPU_INDEX} is unavailable; "
+                f"CUDA reports {torch.cuda.device_count()} GPU(s)"
+            )
+        torch.cuda.set_device(GPU_INDEX)
+        props = torch.cuda.get_device_properties(GPU_INDEX)
         vram_gb = props.total_memory / (1024 ** 3)
         print(
-            f"[Device] CUDA GPU detected: {props.name} "
+            f"[Device] CUDA GPU detected: {props.name} (index {GPU_INDEX}) "
             f"({vram_gb:.1f}GB VRAM, compute {props.major}.{props.minor})"
         )
         return "cuda", torch.float16, vram_gb
+
+    if REQUESTED_DEVICE == "cuda":
+        raise RuntimeError(
+            "VAAKSETU_DEVICE=cuda but CUDA is unavailable. Install an NVIDIA "
+            "driver and CUDA-enabled PyTorch, or use VAAKSETU_DEVICE=auto."
+        )
 
     # 2. Apple Silicon MPS (guarded — not available on Windows builds of PyTorch)
     try:
@@ -136,13 +179,6 @@ print(
     f"[Local AI] VaakSetu Local Engine v3.0 | Device: {DEVICE} | "
     f"dtype: {TORCH_DTYPE} | Est. VRAM: {AVAILABLE_VRAM_GB:.1f}GB"
 )
-
-# VRAM thresholds for 1B vs distilled model selection
-VRAM_1B_THRESHOLD_GB = 6.0
-
-# Maximum number of translation models to keep in memory simultaneously
-MAX_LOADED_TRANSLATION_MODELS = 2
-
 
 # ---------------------------------------------------------------------------
 # Language Code Mapping
@@ -680,6 +716,15 @@ def clean_repetitive_phrases(text: str) -> str:
     return cleaned
 
 
+def safe_round(value: Any, digits: int, default: float = 0.0) -> float:
+    """Return JSON-safe numeric output for model values that may be NaN/inf."""
+    try:
+        numeric = float(value)
+        return round(numeric, digits) if math.isfinite(numeric) else default
+    except (TypeError, ValueError):
+        return default
+
+
 # ---------------------------------------------------------------------------
 # Anti-Repetition & Hallucination Filter
 # ---------------------------------------------------------------------------
@@ -1098,8 +1143,8 @@ class WhisperManager:
                 continue
 
             raw_segments.append({
-                "start": round(s.start, 3),
-                "end": round(s.end, 3),
+                "start": safe_round(s.start, 3),
+                "end": safe_round(s.end, 3),
                 "text": clean_text,
             })
 
@@ -1111,9 +1156,9 @@ class WhisperManager:
                         continue
                     all_words.append({
                         "word": word_text,
-                        "start": round(w.start, 3),
-                        "end": round(w.end, 3),
-                        "probability": round(getattr(w, "probability", 1.0), 3),
+                        "start": safe_round(w.start, 3),
+                        "end": safe_round(w.end, 3),
+                        "probability": safe_round(getattr(w, "probability", 1.0), 3, 1.0),
                     })
 
         print(f"[Local AI] ASR raw: {len(raw_segments)} VAD segments, {len(all_words)} words extracted")
@@ -1122,7 +1167,7 @@ class WhisperManager:
         coarse_segments = deduplicate_segments(raw_segments)
         full_text = " ".join(s["text"] for s in coarse_segments).strip()
         detected_lang = getattr(info, "language", None) or (language or "hi")
-        duration = round(getattr(info, "duration", 0.0), 2)
+        duration = safe_round(getattr(info, "duration", 0.0), 2)
 
         # Guard: If auto-detection incorrectly picked 'bn' on intro music and produced 0 valid segments,
         # automatically re-transcribe with Marathi ('mr') to extract the actual dialogue!
@@ -1175,8 +1220,8 @@ class WhisperManager:
             "coarse_segments": coarse_segments,  # Original VAD segments (for debugging)
             "words": all_words,             # Raw word-level timestamps
             "detected_language": detected_lang,
-            "language_probability": round(
-                getattr(info, "language_probability", 1.0), 2
+            "language_probability": safe_round(
+                getattr(info, "language_probability", 1.0), 2, 1.0
             ),
             "duration": duration,
             "model": f"whisper-{self.model_size}-{'gpu' if self._loaded_device == 'cuda' else 'cpu'}",
@@ -1482,14 +1527,15 @@ class TranscribePathRequest(BaseModel):
 async def health_check():
     """Health check with full device, VRAM, and model status information."""
     vram_info: Dict[str, Any] = {"total_gb": round(AVAILABLE_VRAM_GB, 2)}
+    cuda_available = torch.cuda.is_available()
     if DEVICE == "cuda":
         try:
-            allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
-            reserved = torch.cuda.memory_reserved(0) / (1024 ** 3)
+            allocated = torch.cuda.memory_allocated(GPU_INDEX) / (1024 ** 3)
+            reserved = torch.cuda.memory_reserved(GPU_INDEX) / (1024 ** 3)
             vram_info["allocated_gb"] = round(allocated, 2)
             vram_info["reserved_gb"] = round(reserved, 2)
             vram_info["free_gb"] = round(AVAILABLE_VRAM_GB - reserved, 2)
-            vram_info["device_name"] = torch.cuda.get_device_name(0)
+            vram_info["device_name"] = torch.cuda.get_device_name(GPU_INDEX)
         except Exception:
             pass
 
@@ -1499,6 +1545,10 @@ async def health_check():
         "service": "VaakSetu Local AI Engine v3.0",
         "platform": sys.platform,
         "device": DEVICE,
+        "requested_device": REQUESTED_DEVICE,
+        "gpu_index": GPU_INDEX,
+        "cuda_available": cuda_available,
+        "cuda_version": torch.version.cuda,
         "torch_dtype": str(TORCH_DTYPE),
         "vram": vram_info,
         "translation": {
@@ -1506,7 +1556,7 @@ async def health_check():
             "max_loaded_models": MAX_LOADED_TRANSLATION_MODELS,
             "uses_1b_models": uses_1b,
             "vram_threshold_for_1b": VRAM_1B_THRESHOLD_GB,
-            "has_indictrans2": bool(translator._get_hf_token()),
+            "has_indictrans2": translator.processor is not None,
             "has_processor": translator.processor is not None,
             "fallback": "nllb-200-distilled-600M",
         },

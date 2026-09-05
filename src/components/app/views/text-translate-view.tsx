@@ -72,6 +72,7 @@ export function TextTranslateView() {
   const [recording, setRecording] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const translationRequestRef = useRef<AbortController | null>(null);
 
   // Auto-translate on typing with debounce
   useEffect(() => {
@@ -83,9 +84,12 @@ export function TextTranslateView() {
 
     const timer = setTimeout(() => {
       void runTranslation(input, source, target);
-    }, 600);
+    }, 900);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      translationRequestRef.current?.abort();
+    };
   }, [input, source, target]);
 
   const runTranslation = async (
@@ -94,6 +98,9 @@ export function TextTranslateView() {
     tgtLang: string,
   ) => {
     if (!textToTranslate.trim()) return;
+    translationRequestRef.current?.abort();
+    const controller = new AbortController();
+    translationRequestRef.current = controller;
     setLoading(true);
     setAudioUrl(null);
     setDefaultSourceLang(srcLang);
@@ -108,14 +115,20 @@ export function TextTranslateView() {
           sourceLang: srcLang,
           targetLang: tgtLang,
         }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Translation failed");
       setResult(data as TranslateResponse);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Translation failed");
+      if (!(e instanceof DOMException && e.name === "AbortError")) {
+        toast.error(e instanceof Error ? e.message : "Translation failed");
+      }
     } finally {
-      setLoading(false);
+      if (translationRequestRef.current === controller) {
+        translationRequestRef.current = null;
+        setLoading(false);
+      }
     }
   };
 
