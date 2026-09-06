@@ -80,7 +80,7 @@ def find_python(explicit_venv: Path | None = None) -> Path:
 
 def check_dependencies(python: Path) -> bool:
     """Check that critical Python packages are installed."""
-    required = ["fastapi", "torch", "faster_whisper", "uvicorn", "pydub", "pyttsx3"]
+    required = ["fastapi", "torch", "faster_whisper", "uvicorn", "pydub", "pyttsx3", "piper"]
     result = subprocess.run(
         [str(python), "-c", f"import {', '.join(required)}; print('ok')"],
         capture_output=True,

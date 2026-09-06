@@ -212,10 +212,10 @@ Download only selected groups when USB space is limited:
 
 ```powershell
 python scripts/download-models.py --model whisper --model nllb
-Translated voice generation uses the local `pyttsx3` OS voice engine and does
-not contact Edge TTS or gTTS. Install the required Windows language voices on
-the machine; the service automatically selects a matching installed voice and
-otherwise uses the system default voice.
+Translated voice generation uses a locally staged Piper neural voice and does
+not contact Edge TTS or gTTS. Download the Hindi voice with
+`python scripts/download-tts-models.py --language hi` before disconnecting the
+machine from the network.
 
 ### Step 3: Set Up the Next.js Frontend & Database
 1. In a new terminal, install frontend dependencies:

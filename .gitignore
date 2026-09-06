@@ -63,6 +63,7 @@ server.log
 /storage/uploads/*
 /storage/test_media/*
 /storage/workspace/*
+/models/tts/*
 /upload/*
 /download/*
 /release/

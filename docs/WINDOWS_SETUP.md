@@ -319,12 +319,17 @@ Start the offline laptop in this order:
 npm run dev
 ```
 
-TTS uses the local `pyttsx3` Windows SAPI engine and does not require network
-access. Install Hindi and Marathi speech voices in Windows if those languages
-are needed. An English-only voice cannot synthesize Devanagari and the service
-uses an offline phonetic transliteration fallback so audio is still produced.
-Install Indic voices for native pronunciation. Whisper, NLLB, and IndicTrans2
-also run locally when their models and dependencies are installed.
+TTS uses a locally staged Piper neural voice and does not require network access
+at runtime. Download the Hindi voice once while online:
+
+```powershell
+python .\scripts\download-tts-models.py --language hi
+```
+
+The voice is stored in `models/tts/` and is ignored by Git. Piper provides
+natural Hindi audio; `pyttsx3` is only a last-resort fallback when no Piper
+voice is present. Whisper, NLLB, and IndicTrans2 also run locally when their
+models and dependencies are installed.
 
 ## Troubleshooting
 

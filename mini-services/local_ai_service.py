@@ -1257,6 +1257,46 @@ class TtsManager:
     with silence padding and gentle time-stretching via ffmpeg atempo.
     """
 
+    _piper_voices: Dict[str, Any] = {}
+
+    @classmethod
+    def _piper_model_path(cls, language: str) -> Optional[Path]:
+        model_dir = Path(
+            os.environ.get(
+                "VAAKSETU_TTS_MODEL_DIR",
+                str(Path(__file__).resolve().parents[1] / "models" / "tts"),
+            )
+        )
+        lang_key = language.lower().split("-")[0]
+        preferred = {
+            "hi": ["hi_IN-priyamvada-medium.onnx", "hi_IN-rohan-medium.onnx"],
+            "mr": ["mr_IN-meera-medium.onnx"],
+            "en": ["en_US-lessac-medium.onnx"],
+        }.get(lang_key, [])
+        for name in preferred:
+            path = model_dir / name
+            if path.is_file() and (model_dir / f"{name}.json").is_file():
+                return path
+        return None
+
+    @classmethod
+    def _synthesize_piper(cls, text: str, language: str, output_path: Path) -> bool:
+        model_path = cls._piper_model_path(language)
+        if not model_path:
+            return False
+        from piper import PiperVoice
+
+        key = str(model_path)
+        voice = cls._piper_voices.get(key)
+        if voice is None:
+            voice = PiperVoice.load(key)
+            cls._piper_voices[key] = voice
+        import wave
+
+        with wave.open(str(output_path), "wb") as wav_file:
+            voice.synthesize_wav(text.strip() or "...", wav_file)
+        return output_path.exists() and output_path.stat().st_size > 0
+
     @staticmethod
     def _latinize_indic(text: str) -> str:
         """Approximate Devanagari pronunciation for an English-only local voice."""
@@ -1316,6 +1356,8 @@ class TtsManager:
     def _synthesize_local(text: str, language: str, output_path: Path) -> None:
         """Synthesize with an installed offline OS voice; never contacts a service."""
         lang_key = language.lower().split("-")[0]
+        if TtsManager._synthesize_piper(text, language, output_path):
+            return
         speech_text = TtsManager._tts_input_text(text.strip() or "...", language)
         import shutil
 

@@ -117,15 +117,15 @@ export const MODEL_REGISTRY: ModelDescriptor[] = [
   {
     id: "ai4bharat-tts",
     role: "tts",
-    name: "Offline OS Speech Synthesis",
-    provider: "Microsoft / Google",
-    license: "Free tier",
+    name: "Piper Neural TTS",
+    provider: "Piper local voice models",
+    license: "Open voice model license",
     available: true,
     quality: 0.90,
     speed: 0.80,
-    footprintGb: 0.0, // Uses an installed local OS voice
+    footprintGb: 0.1, // Voice model is stored locally
     languages: ["mr", "hi", "en", "bn", "gu", "ta", "te", "kn", "ml", "ur"],
-    note: "Offline speech synthesis using an installed Windows, macOS, or Linux voice.",
+    note: "Natural offline neural speech from a locally staged Piper voice model.",
   },
   // ── LLM ─────────────────────────────────────────────────────────────────
   {

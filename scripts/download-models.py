@@ -130,8 +130,8 @@ def download_models(model_ids: Iterable[str], cache_dir: Path, token: str | None
         print("\n[RESULT] Some models failed. Rerun the command to resume.", file=sys.stderr)
         return 1
 
-    print("\n[RESULT] All requested models are available in the Hugging Face cache.")
-    print("[NOTE] Edge TTS and gTTS are network services; this script cannot cache their voices.")
+    print("\n[RESULT] All requested AI models are available in the Hugging Face cache.")
+    print("[NOTE] Download local neural TTS voices with scripts/download-tts-models.py.")
     return 0
 
 

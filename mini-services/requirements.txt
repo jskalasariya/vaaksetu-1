@@ -34,7 +34,8 @@ IndicTransToolkit>=0.1.0; sys_platform != "win32"
 faster-whisper>=1.0.0
 
 # ── Offline TTS Engine ────────────────────────────────────────
-# Windows SAPI; espeak on Linux/macOS
+# Piper neural TTS is preferred; pyttsx3 remains a last-resort fallback.
+piper-tts>=1.2.0
 pyttsx3>=2.90
 
 # ── Audio Processing ───────────────────────────────────────────
