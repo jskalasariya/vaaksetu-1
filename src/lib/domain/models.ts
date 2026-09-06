@@ -117,15 +117,15 @@ export const MODEL_REGISTRY: ModelDescriptor[] = [
   {
     id: "ai4bharat-tts",
     role: "tts",
-    name: "Neural TTS (Edge + gTTS)",
+    name: "Offline OS Speech Synthesis",
     provider: "Microsoft / Google",
     license: "Free tier",
     available: true,
     quality: 0.90,
     speed: 0.80,
-    footprintGb: 0.0, // edge_tts is API-based; no local VRAM
+    footprintGb: 0.0, // Uses an installed local OS voice
     languages: ["mr", "hi", "en", "bn", "gu", "ta", "te", "kn", "ml", "ur"],
-    note: "Neural Indic-accent voices via Edge TTS; gTTS offline fallback.",
+    note: "Offline speech synthesis using an installed Windows, macOS, or Linux voice.",
   },
   // ── LLM ─────────────────────────────────────────────────────────────────
   {

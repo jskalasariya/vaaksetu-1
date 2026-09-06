@@ -79,11 +79,21 @@ $compute | ForEach-Object { Write-Host "[Compute] $_" -ForegroundColor Cyan }
 
 # ── Validate critical dependencies ────────────────────────────
 Write-Host "[Check] Validating dependencies..." -ForegroundColor Yellow
-$depsOk = & $Python -c "import fastapi, torch, faster_whisper; print('ok')" 2>$null
+$depsOk = & $Python -c "import fastapi, torch, faster_whisper, pyttsx3; print('ok')" 2>$null
 if ($depsOk -ne "ok") {
     Write-Host "[WARN] Some dependencies may be missing. Run:" -ForegroundColor Yellow
     Write-Host "       $Python -m pip install -r $RootDir\mini-services\requirements.txt"
 }
+
+# Force local model loading for every service process started by this script.
+if (-not $env:HUGGINGFACE_HUB_CACHE) {
+    $env:HUGGINGFACE_HUB_CACHE = Join-Path $env:USERPROFILE ".cache\huggingface\hub"
+}
+$env:HF_HOME = Split-Path $env:HUGGINGFACE_HUB_CACHE
+$env:HF_HUB_OFFLINE = "1"
+$env:TRANSFORMERS_OFFLINE = "1"
+$env:HF_DATASETS_OFFLINE = "1"
+Write-Host "[Offline] Hugging Face cache: $env:HUGGINGFACE_HUB_CACHE" -ForegroundColor Cyan
 
 # ── Start Service ─────────────────────────────────────────────
 $Port = if ($env:LOCAL_AI_PORT) { $env:LOCAL_AI_PORT } else { "8000" }

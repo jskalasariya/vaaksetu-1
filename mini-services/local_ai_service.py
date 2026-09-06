@@ -34,6 +34,16 @@ try:
 except ImportError:
     pass
 
+# This service is intended to run from pre-downloaded model snapshots.
+# Set these before importing Transformers so no Hub lookup can occur.
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+if not os.environ.get("HUGGINGFACE_HUB_CACHE"):
+    os.environ["HUGGINGFACE_HUB_CACHE"] = str(
+        Path.home() / ".cache" / "huggingface" / "hub"
+    )
+
 # Enable MPS fallback to CPU for unsupported Metal kernels (prevents hard SIGABRT crashes)
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
@@ -359,13 +369,17 @@ class TranslationManager:
                         self._evict_oldest_model()
 
                     tok = AutoTokenizer.from_pretrained(
-                        it_name, trust_remote_code=True, token=token
+                        it_name,
+                        trust_remote_code=True,
+                        token=token,
+                        local_files_only=True,
                     )
                     mod = AutoModelForSeq2SeqLM.from_pretrained(
                         it_name,
                         trust_remote_code=True,
                         torch_dtype=TORCH_DTYPE,
                         token=token,
+                        local_files_only=True,
                     ).to(DEVICE)
                     mod.eval()
                     self.models[it_name] = mod
@@ -385,9 +399,14 @@ class TranslationManager:
             while len(self.models) >= MAX_LOADED_TRANSLATION_MODELS:
                 self._evict_oldest_model()
 
-            tok = AutoTokenizer.from_pretrained(nllb_name)
+            tok = AutoTokenizer.from_pretrained(
+                nllb_name,
+                local_files_only=True,
+            )
             mod = AutoModelForSeq2SeqLM.from_pretrained(
-                nllb_name, torch_dtype=TORCH_DTYPE
+                nllb_name,
+                torch_dtype=TORCH_DTYPE,
+                local_files_only=True,
             ).to(DEVICE)
             mod.eval()
             self.models[nllb_name] = mod
@@ -1238,6 +1257,141 @@ class TtsManager:
     with silence padding and gentle time-stretching via ffmpeg atempo.
     """
 
+    @staticmethod
+    def _latinize_indic(text: str) -> str:
+        """Approximate Devanagari pronunciation for an English-only local voice."""
+        consonants = {
+            "क": "k", "ख": "kh", "ग": "g", "घ": "gh", "ङ": "ng",
+            "च": "ch", "छ": "chh", "ज": "j", "झ": "jh", "ञ": "ny",
+            "ट": "t", "ठ": "th", "ड": "d", "ढ": "dh", "ण": "n",
+            "त": "t", "थ": "th", "द": "d", "ध": "dh", "न": "n",
+            "प": "p", "फ": "ph", "ब": "b", "भ": "bh", "म": "m",
+            "य": "y", "र": "r", "ल": "l", "व": "v", "श": "sh",
+            "ष": "sh", "स": "s", "ह": "h", "ळ": "l",
+        }
+        vowels = {
+            "ा": "a", "ि": "i", "ी": "ee", "ु": "u", "ू": "oo",
+            "ृ": "ri", "े": "e", "ै": "ai", "ो": "o", "ौ": "au",
+        }
+        independent = {
+            "अ": "a", "आ": "aa", "इ": "i", "ई": "ee", "उ": "u",
+            "ऊ": "oo", "ए": "e", "ऐ": "ai", "ओ": "o", "औ": "au",
+            "ं": "n", "ः": "h", "ँ": "n",
+        }
+        output = []
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if char in consonants:
+                value = consonants[char]
+                if index + 1 < len(text) and text[index + 1] in vowels:
+                    value += vowels[text[index + 1]]
+                    index += 1
+                elif index + 1 < len(text) and text[index + 1] == "्":
+                    index += 1
+                else:
+                    value += "a"
+                output.append(value)
+            elif char in independent:
+                output.append(independent[char])
+            elif char == "।":
+                output.append(".")
+            elif char.isspace() or char.isascii():
+                output.append(char)
+            index += 1
+        return "".join(output)
+
+    @classmethod
+    def _tts_input_text(cls, text: str, language: str) -> str:
+        """Use native text when a matching voice exists; otherwise phonetic fallback."""
+        if language.lower().split("-")[0] in {"hi", "mr"} and any(
+            "\u0900" <= char <= "\u097f" for char in text
+        ):
+            fallback = cls._latinize_indic(text)
+            print("[TTS] No Indic SAPI voice configured; using offline phonetic fallback.")
+            return fallback
+        return text
+
+    @staticmethod
+    def _synthesize_local(text: str, language: str, output_path: Path) -> None:
+        """Synthesize with an installed offline OS voice; never contacts a service."""
+        lang_key = language.lower().split("-")[0]
+        speech_text = TtsManager._tts_input_text(text.strip() or "...", language)
+        import shutil
+
+        speech_shell = (
+            shutil.which("powershell.exe") or shutil.which("pwsh.exe")
+            or (
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+                if Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe").is_file()
+                else None
+            )
+            if sys.platform == "win32"
+            else None
+        )
+        if speech_shell:
+            input_path = Path(tempfile.mktemp(suffix=".txt"))
+            input_path.write_text(speech_text, encoding="utf-8")
+            script = (
+                "Add-Type -AssemblyName System.Speech; "
+                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                "$voices = $s.GetInstalledVoices(); "
+                "$match = $voices | Where-Object { $_.VoiceInfo.Culture.Name -like "
+                f"'{lang_key}-*' }} | Select-Object -First 1; "
+                "if ($match) { $s.SelectVoice($match.VoiceInfo.Name) }; "
+                "$s.SetOutputToWaveFile($env:VAAKSETU_TTS_OUTPUT); "
+                "$s.Speak((Get-Content -Raw -Encoding UTF8 $env:VAAKSETU_TTS_INPUT)); "
+                "$s.Dispose()"
+            )
+            env = os.environ.copy()
+            env["VAAKSETU_TTS_INPUT"] = str(input_path)
+            env["VAAKSETU_TTS_OUTPUT"] = str(output_path)
+            try:
+                result = subprocess.run(
+                    [
+                        speech_shell, "-NoProfile", "-NonInteractive",
+                        "-ExecutionPolicy", "Bypass", "-Command", script,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=60,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or "Windows Speech synthesis failed")
+            finally:
+                if input_path.exists():
+                    input_path.unlink()
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            import pyttsx3
+
+            engine = pyttsx3.init()
+            try:
+                voices = engine.getProperty("voices") or []
+                for voice in voices:
+                    voice_info = " ".join(
+                        str(value).lower()
+                        for value in (
+                            getattr(voice, "id", ""),
+                            getattr(voice, "name", ""),
+                            getattr(voice, "languages", []),
+                        )
+                    )
+                    if lang_key in voice_info:
+                        engine.setProperty("voice", voice.id)
+                        break
+                engine.save_to_file(speech_text, str(output_path))
+                engine.runAndWait()
+            finally:
+                engine.stop()
+
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"No offline voice output was created for language '{lang_key}'. "
+                "Install an OS voice for this language."
+            )
+
     async def synthesize_single(
         self,
         text: str,
@@ -1245,27 +1399,15 @@ class TtsManager:
         voice_override: Optional[str] = None,
         rate: str = "+0%",
     ) -> bytes:
-        """Synthesize a single text block to MP3 bytes with natural speech rate."""
-        import edge_tts
-
-        lang_key = language.lower().split("-")[0]
-        voice = voice_override or TTS_VOICE_MAP.get(lang_key, "hi-IN-SwaraNeural")
+        """Synthesize a single text block locally to WAV bytes."""
         clean_text = text.strip() or "..."
 
-        tmp_path = Path(tempfile.mktemp(suffix=".mp3"))
+        tmp_path = Path(tempfile.mktemp(suffix=".wav"))
         try:
-            communicate = edge_tts.Communicate(clean_text, voice, rate=rate)
-            await communicate.save(str(tmp_path))
+            await asyncio.to_thread(self._synthesize_local, clean_text, language, tmp_path)
             return tmp_path.read_bytes()
         except Exception as e:
-            print(f"[Local AI] Edge TTS notice: {e}, attempting gTTS fallback...")
-            from gtts import gTTS
-            tts = gTTS(
-                text=clean_text,
-                lang=lang_key if lang_key in ["hi", "mr", "en", "bn", "gu", "ta", "te"] else "hi",
-            )
-            tts.save(str(tmp_path))
-            return tmp_path.read_bytes()
+            raise RuntimeError(f"Offline TTS failed: {e}") from e
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -1283,14 +1425,17 @@ class TtsManager:
         crystal-clear pronunciation and no chopped syllables.
         """
         from pydub import AudioSegment
-        import edge_tts
-
-        lang_key = language.lower().split("-")[0]
-        voice = voice_override or TTS_VOICE_MAP.get(lang_key, "hi-IN-SwaraNeural")
-
-        # Clean and deduplicate segments before TTS synthesis
-        segments = deduplicate_segments(segments)
+        # Translated text must not pass through the ASR hallucination filter:
+        # that filter is intentionally conservative for Whisper output and can
+        # misclassify valid non-Latin text on Windows locale configurations.
+        cleaned_segments = []
+        for segment in segments:
+            text = clean_repetitive_phrases(str(segment.get("text", "")))
+            if text:
+                cleaned_segments.append({**segment, "text": text})
+        segments = cleaned_segments
         if not segments:
+            print("[TTS] No valid translated segments received; returning silence.")
             silence = AudioSegment.silent(duration=int(total_duration * 1000))
             buf = BytesIO()
             silence.export(buf, format="mp3", bitrate="192k")
@@ -1300,36 +1445,31 @@ class TtsManager:
         timeline_ms = int(max(total_duration, segments[-1]["end"] + 2.0) * 1000)
         output = AudioSegment.silent(duration=timeline_ms)
 
+        successful_segments = 0
+        failed_segments = 0
+        skipped_segments = 0
         for i, seg in enumerate(segments):
             seg_text = clean_repetitive_phrases(seg.get("text", "").strip())
-            if not seg_text or is_hallucination_or_noise(seg_text):
+            if not seg_text:
+                skipped_segments += 1
+                print(f"[TTS] Skipping segment {i}: translated text is empty.")
                 continue
 
             seg_start_ms = int(seg["start"] * 1000)
             seg_end_ms = int(seg["end"] * 1000)
             slot_duration_ms = max(500, seg_end_ms - seg_start_ms)
 
-            tmp_path = Path(tempfile.mktemp(suffix=".mp3"))
+            tmp_path = Path(tempfile.mktemp(suffix=".wav"))
             try:
-                try:
-                    # Natural rate (+0%) ensures crisp, human pronunciation
-                    communicate = edge_tts.Communicate(seg_text, voice, rate="+0%")
-                    await communicate.save(str(tmp_path))
-                except Exception as e:
-                    print(f"[TTS] Edge TTS segment {i} notice: {e}, trying gTTS...")
-                    from gtts import gTTS
-                    fallback_lang = (
-                        lang_key
-                        if lang_key in ["hi", "mr", "en", "bn", "gu", "ta", "te"]
-                        else "hi"
-                    )
-                    tts = gTTS(text=seg_text, lang=fallback_lang)
-                    tts.save(str(tmp_path))
+                await asyncio.to_thread(
+                    self._synthesize_local, seg_text, language, tmp_path
+                )
 
                 seg_audio = AudioSegment.from_file(str(tmp_path))
 
             except Exception as e:
-                print(f"[TTS] Segment {i} synthesis failed: {e}")
+                failed_segments += 1
+                print(f"[TTS] Offline segment {i} synthesis failed: {e}")
                 continue
             finally:
                 if tmp_path.exists():
@@ -1337,6 +1477,11 @@ class TtsManager:
 
             actual_ms = len(seg_audio)
             if actual_ms <= 0:
+                failed_segments += 1
+                print(
+                    f"[TTS] Offline segment {i} produced zero-duration audio "
+                    f"(file_bytes={tmp_path.stat().st_size if tmp_path.exists() else 0})."
+                )
                 continue
 
             # Gentle time alignment: only speed up slightly if speech is significantly longer than slot
@@ -1347,11 +1492,24 @@ class TtsManager:
 
             # Smoothly overlay at start timestamp without hard clipping
             output = output.overlay(seg_audio, position=seg_start_ms)
+            successful_segments += 1
 
             if (i + 1) % 20 == 0:
                 print(f"[TTS] Processed {i + 1}/{len(segments)} segments...")
 
-        print(f"[TTS] ✓ All {len(segments)} segments synthesized and smoothly aligned.")
+        print(
+            f"[TTS] Completed {successful_segments}/{len(segments)} segments "
+            f"offline ({failed_segments} failed, {skipped_segments} skipped); "
+            "timeline aligned."
+        )
+
+        if successful_segments == 0 and failed_segments > 0:
+            raise RuntimeError(
+                f"Offline TTS produced no audio for language '{language}'. "
+                "The input may contain replacement characters or no readable "
+                "text; install a matching Windows Speech voice (Hindi or Marathi) "
+                "for native pronunciation."
+            )
 
         buf = BytesIO()
         output.export(buf, format="mp3", bitrate="192k")

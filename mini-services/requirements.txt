@@ -33,9 +33,9 @@ IndicTransToolkit>=0.1.0; sys_platform != "win32"
 # faster-whisper uses CTranslate2 for fast CPU/CUDA inference
 faster-whisper>=1.0.0
 
-# ── TTS Engines ────────────────────────────────────────────────
-edge-tts>=6.1.9
-gTTS>=2.5.0
+# ── Offline TTS Engine ────────────────────────────────────────
+# Windows SAPI; espeak on Linux/macOS
+pyttsx3>=2.90
 
 # ── Audio Processing ───────────────────────────────────────────
 pydub>=0.25.1

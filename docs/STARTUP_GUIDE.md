@@ -212,8 +212,10 @@ Download only selected groups when USB space is limited:
 
 ```powershell
 python scripts/download-models.py --model whisper --model nllb
-The current TTS implementation uses Edge TTS and gTTS, which require network
-access. Model caching alone does not make translated voice generation offline.
+Translated voice generation uses the local `pyttsx3` OS voice engine and does
+not contact Edge TTS or gTTS. Install the required Windows language voices on
+the machine; the service automatically selects a matching installed voice and
+otherwise uses the system default voice.
 
 ### Step 3: Set Up the Next.js Frontend & Database
 1. In a new terminal, install frontend dependencies:

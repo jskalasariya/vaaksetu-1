@@ -319,9 +319,12 @@ Start the offline laptop in this order:
 npm run dev
 ```
 
-The current TTS implementation uses Edge TTS and gTTS, both of which require
-network access. Whisper, NLLB, and IndicTrans2 can run locally when their models
-and dependencies are installed.
+TTS uses the local `pyttsx3` Windows SAPI engine and does not require network
+access. Install Hindi and Marathi speech voices in Windows if those languages
+are needed. An English-only voice cannot synthesize Devanagari and the service
+uses an offline phonetic transliteration fallback so audio is still produced.
+Install Indic voices for native pronunciation. Whisper, NLLB, and IndicTrans2
+also run locally when their models and dependencies are installed.
 
 ## Troubleshooting
 

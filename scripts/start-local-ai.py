@@ -80,7 +80,7 @@ def find_python(explicit_venv: Path | None = None) -> Path:
 
 def check_dependencies(python: Path) -> bool:
     """Check that critical Python packages are installed."""
-    required = ["fastapi", "torch", "faster_whisper", "uvicorn", "pydub"]
+    required = ["fastapi", "torch", "faster_whisper", "uvicorn", "pydub", "pyttsx3"]
     result = subprocess.run(
         [str(python), "-c", f"import {', '.join(required)}; print('ok')"],
         capture_output=True,
@@ -143,6 +143,15 @@ def main():
     # ── Launch ────────────────────────────────────────────────
     env = os.environ.copy()
     env["LOCAL_AI_PORT"] = str(args.port)
+    env["HUGGINGFACE_HUB_CACHE"] = env.get(
+        "HUGGINGFACE_HUB_CACHE",
+        str(Path.home() / ".cache" / "huggingface" / "hub"),
+    )
+    env["HF_HOME"] = str(Path(env["HUGGINGFACE_HUB_CACHE"]).parent)
+    env["HF_HUB_OFFLINE"] = "1"
+    env["TRANSFORMERS_OFFLINE"] = "1"
+    env["HF_DATASETS_OFFLINE"] = "1"
+    print(f"[Offline] Hugging Face cache: {env['HUGGINGFACE_HUB_CACHE']}")
 
     print(f"[Start] Launching on http://127.0.0.1:{args.port} ...")
     os.chdir(ROOT_DIR)

@@ -4,7 +4,7 @@
  * Connects to the local FastAPI microservice (http://127.0.0.1:8000) for:
  *  - IndicTrans2 (200M / 1B) neural translation with context-aware batching
  *  - Whisper Small/Medium ASR (GPU-accelerated when available)
- *  - Neural TTS (Edge TTS with Indic voices + gTTS fallback)
+ *  - Offline OS speech synthesis through the local AI service
  *  - Video Dubbing via FFmpeg
  *
  * Cross-platform: works on macOS (MPS/CPU), Windows 11 (CUDA/CPU), Linux (CUDA/CPU).

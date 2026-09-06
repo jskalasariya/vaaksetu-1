@@ -71,6 +71,13 @@ fi
 echo "[OK] Using Python: $PYTHON"
 "$PYTHON" --version
 
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HOME/.cache/huggingface/hub}"
+export HF_HOME="$(dirname "$HUGGINGFACE_HUB_CACHE")"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+echo "[Offline] Hugging Face cache: $HUGGINGFACE_HUB_CACHE"
+
 # ── Validate critical dependencies ────────────────────────────
 echo "[Check] Validating dependencies..."
 "$PYTHON" -c "import fastapi, torch, faster_whisper" 2>/dev/null || {
