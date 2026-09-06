@@ -25,6 +25,14 @@ import type {
 
 const LOCAL_AI_URL = process.env.LOCAL_AI_URL || "http://127.0.0.1:8000";
 
+const localAiConnectionError = (operation: string, error: unknown): Error => {
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `Local AI service unavailable during ${operation} at ${LOCAL_AI_URL}. ` +
+      `Start scripts/start-local-ai.ps1 and verify /health. (${detail})`,
+  );
+};
+
 // Cached device description from the last health check
 let _cachedDeviceDescription = "Local AI Engine";
 
@@ -150,16 +158,21 @@ export const LocalTranscriptionEngine: TranscriptionEngine = {
 
     // Use the YouTube-grade endpoint that returns word-level timestamps
     // and fine-grained sentence segments instead of coarse VAD chunks
-    const res = await fetch(`${LOCAL_AI_URL}/api/transcribe-sentences`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        audio_path: audioPath,
-        language: language && language !== "auto" ? language : undefined,
-        model_size: modelSize,
-      }),
-      signal: AbortSignal.timeout(1_200_000), // 20 min — up to 30 min videos
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${LOCAL_AI_URL}/api/transcribe-sentences`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audio_path: audioPath,
+          language: language && language !== "auto" ? language : undefined,
+          model_size: modelSize,
+        }),
+        signal: AbortSignal.timeout(1_200_000), // 20 min — up to 30 min videos
+      });
+    } catch (error) {
+      throw localAiConnectionError("transcription", error);
+    }
 
     if (!res.ok) {
       const err = await res.text();

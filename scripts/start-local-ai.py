@@ -156,16 +156,14 @@ def main():
     print(f"[Start] Launching on http://127.0.0.1:{args.port} ...")
     os.chdir(ROOT_DIR)
 
-    try:
-        os.execv(str(python), [str(python), str(SERVICE_FILE)])
-    except AttributeError:
-        # os.execv is not available on Windows; use subprocess instead
-        proc = subprocess.run(
-            [str(python), str(SERVICE_FILE)],
-            env=env,
-            cwd=ROOT_DIR,
-        )
-        sys.exit(proc.returncode)
+    # subprocess is used on every platform so the offline environment is
+    # passed explicitly; os.execv would inherit the parent environment only.
+    proc = subprocess.run(
+        [str(python), str(SERVICE_FILE)],
+        env=env,
+        cwd=ROOT_DIR,
+    )
+    sys.exit(proc.returncode)
 
 
 if __name__ == "__main__":
