@@ -34,11 +34,40 @@ try:
 except ImportError:
     pass
 
-# This service is intended to run from pre-downloaded model snapshots.
-# Set these before importing Transformers so no Hub lookup can occur.
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_DATASETS_OFFLINE"] = "1"
+# Models are loaded cache-first in offline UI mode. A missing snapshot may be
+# downloaded once; use VAAKSETU_AIRGAPPED=1 to prohibit all Hub access.
+OFFLINE_MODE = os.environ.get("VAAKSETU_OFFLINE", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+AIRGAPPED_MODE = os.environ.get("VAAKSETU_AIRGAPPED", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+
+
+def set_offline_mode(offline: Optional[bool]) -> None:
+    """Apply the UI-selected cache-first policy to this running service."""
+    global OFFLINE_MODE
+    if offline is None:
+        return
+    OFFLINE_MODE = offline
+    os.environ["VAAKSETU_OFFLINE"] = "1" if OFFLINE_MODE else "0"
+    if AIRGAPPED_MODE:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        os.environ["HF_DATASETS_OFFLINE"] = "1"
+    else:
+        os.environ["VAAKSETU_OFFLINE"] = "0"
+        for _hub_var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
+            os.environ.pop(_hub_var, None)
+
+
+if AIRGAPPED_MODE:
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+else:
+    for _hub_var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
+        os.environ.pop(_hub_var, None)
 if not os.environ.get("HUGGINGFACE_HUB_CACHE"):
     os.environ["HUGGINGFACE_HUB_CACHE"] = str(
         Path.home() / ".cache" / "huggingface" / "hub"
@@ -368,18 +397,16 @@ class TranslationManager:
                     while len(self.models) >= MAX_LOADED_TRANSLATION_MODELS:
                         self._evict_oldest_model()
 
-                    tok = AutoTokenizer.from_pretrained(
-                        it_name,
-                        trust_remote_code=True,
-                        token=token,
-                        local_files_only=True,
-                    )
+                    load_options = {
+                        "trust_remote_code": True,
+                        "token": token,
+                        "local_files_only": AIRGAPPED_MODE,
+                    }
+                    tok = AutoTokenizer.from_pretrained(it_name, **load_options)
                     mod = AutoModelForSeq2SeqLM.from_pretrained(
                         it_name,
-                        trust_remote_code=True,
                         torch_dtype=TORCH_DTYPE,
-                        token=token,
-                        local_files_only=True,
+                        **load_options,
                     ).to(DEVICE)
                     mod.eval()
                     self.models[it_name] = mod
@@ -401,12 +428,12 @@ class TranslationManager:
 
             tok = AutoTokenizer.from_pretrained(
                 nllb_name,
-                local_files_only=True,
+                local_files_only=AIRGAPPED_MODE,
             )
             mod = AutoModelForSeq2SeqLM.from_pretrained(
                 nllb_name,
                 torch_dtype=TORCH_DTYPE,
-                local_files_only=True,
+                local_files_only=AIRGAPPED_MODE,
             ).to(DEVICE)
             mod.eval()
             self.models[nllb_name] = mod
@@ -1667,6 +1694,15 @@ class TranslateRequest(BaseModel):
     source_lang: str = "auto"
     target_lang: str = "en"
     hf_token: Optional[str] = None
+    offline_mode: Optional[bool] = None
+
+
+class DocumentAnswerRequest(BaseModel):
+    context: str
+    question: str
+    source_lang: str = "auto"
+    target_lang: str = "en"
+    offline_mode: Optional[bool] = None
 
 
 class BatchTranslateSegmentItem(BaseModel):
@@ -1685,6 +1721,7 @@ class BatchTranslateRequest(BaseModel):
     source_lang: str = "auto"
     target_lang: str = "en"
     hf_token: Optional[str] = None
+    offline_mode: Optional[bool] = None
 
 
 class TtsRequest(BaseModel):
@@ -1717,6 +1754,7 @@ class TranscribePathRequest(BaseModel):
     audio_path: str
     language: Optional[str] = None
     model_size: Optional[str] = None
+    offline_mode: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -1775,6 +1813,7 @@ async def health_check():
 @app.post("/api/translate")
 async def translate_endpoint(req: TranslateRequest):
     """Translate text using IndicTrans2 or NLLB with context-aware batching."""
+    set_offline_mode(req.offline_mode)
     if req.hf_token:
         os.environ["HF_TOKEN"] = req.hf_token
     try:
@@ -1786,6 +1825,85 @@ async def translate_endpoint(req: TranslateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _document_answer(context: str, question: str) -> str:
+    """Return the most relevant source sentences without inventing facts."""
+    import re
+
+    sentences = [
+        item.strip()
+        for item in re.split(r"(?<=[.!?।])\s+|\n+", context)
+        if item.strip()
+    ]
+    question_terms = {
+        term.casefold()
+        for term in re.findall(r"[\w\u0900-\u097F]+", question)
+        if len(term) > 1
+    }
+    if not question_terms:
+        return ""
+
+    ranked = []
+    for index, sentence in enumerate(sentences):
+        sentence_terms = {
+            term.casefold()
+            for term in re.findall(r"[\w\u0900-\u097F]+", sentence)
+        }
+        overlap = question_terms & sentence_terms
+        if overlap:
+            ranked.append((len(overlap), -index, sentence))
+
+    ranked.sort(reverse=True)
+    return " ".join(item[2] for item in ranked[:3])
+
+
+@app.post("/api/document/answer")
+async def document_answer_endpoint(req: DocumentAnswerRequest):
+    """Answer from document evidence and translate only the selected evidence."""
+    set_offline_mode(req.offline_mode)
+    if not req.context.strip():
+        raise HTTPException(status_code=400, detail="Document context is empty.")
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="Question is empty.")
+
+    context_lang = req.source_lang.lower().split("-")[0]
+    if context_lang == "auto":
+        context_lang = detect_script_language(req.context) or "en"
+    question_lang = detect_script_language(req.question) or "en"
+    search_question = req.question
+    if question_lang != context_lang:
+        try:
+            translated_question = await asyncio.to_thread(
+                translator.translate, req.question, question_lang, context_lang
+            )
+            search_question = translated_question.get("translated_text", "").strip() or req.question
+        except Exception as e:
+            print(f"[Local AI] Document question translation notice: {e}")
+
+    evidence = _document_answer(req.context, search_question)
+    if not evidence:
+        answer = {
+            "en": "The answer is not found in the uploaded document.",
+            "hi": "इस प्रश्न का उत्तर अपलोड किए गए दस्तावेज़ में नहीं मिला।",
+            "mr": "या प्रश्नाचे उत्तर अपलोड केलेल्या दस्तऐवजात सापडले नाही.",
+        }.get(req.target_lang, "The answer is not found in the uploaded document.")
+        return {"answer": answer, "grounded": False}
+
+    try:
+        translated = await asyncio.to_thread(
+            translator.translate, evidence, req.source_lang, req.target_lang
+        )
+        answer = translated.get("translated_text", "").strip()
+        if not answer:
+            raise RuntimeError("The local translation model returned an empty answer.")
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not produce the answer in {req.target_lang}: {e}",
+        )
+
+    return {"answer": answer, "grounded": True, "evidence": evidence}
+
+
 @app.post("/api/translate-batch")
 async def translate_batch_endpoint(req: BatchTranslateRequest):
     """
@@ -1795,6 +1913,7 @@ async def translate_batch_endpoint(req: BatchTranslateRequest):
     this endpoint preserves timestamp metadata while grouping segments
     into context windows for coherent translation (prevents gibberish).
     """
+    set_offline_mode(req.offline_mode)
     if req.hf_token:
         os.environ["HF_TOKEN"] = req.hf_token
     try:
@@ -1823,6 +1942,7 @@ async def translate_batch_endpoint(req: BatchTranslateRequest):
 @app.post("/api/transcribe")
 async def transcribe_endpoint(req: TranscribePathRequest):
     """Transcribe audio from a file path (must be accessible by this service)."""
+    set_offline_mode(req.offline_mode)
     if not Path(req.audio_path).exists():
         raise HTTPException(status_code=404, detail="Audio file not found.")
     try:
@@ -1846,6 +1966,7 @@ async def transcribe_sentences_endpoint(req: TranscribePathRequest):
     Use this endpoint for all video/media translation jobs.
     Falls back gracefully to coarse_segments if word timestamps unavailable.
     """
+    set_offline_mode(req.offline_mode)
     if not Path(req.audio_path).exists():
         raise HTTPException(status_code=404, detail="Audio file not found.")
     try:

@@ -35,7 +35,7 @@ export interface LlmEngine {
   /** Single-turn completion. */
   complete(messages: LlmMessage[], opts?: { temperature?: number }): Promise<string>;
   /** Document-aware QA over provided context. */
-  answerWithContext(context: string, question: string, replyLang: string): Promise<string>;
+  answerWithContext(context: string, question: string, replyLang: string, sourceLang?: string): Promise<string>;
   /** Summarize the provided text. */
   summarize(
     text: string,

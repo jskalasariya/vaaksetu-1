@@ -148,10 +148,9 @@ def main():
         str(Path.home() / ".cache" / "huggingface" / "hub"),
     )
     env["HF_HOME"] = str(Path(env["HUGGINGFACE_HUB_CACHE"]).parent)
-    env["HF_HUB_OFFLINE"] = "1"
-    env["TRANSFORMERS_OFFLINE"] = "1"
-    env["HF_DATASETS_OFFLINE"] = "1"
-    print(f"[Offline] Hugging Face cache: {env['HUGGINGFACE_HUB_CACHE']}")
+    airgapped = env.get("VAAKSETU_AIRGAPPED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    print(f"[Models] Hugging Face cache: {env['HUGGINGFACE_HUB_CACHE']}")
+    print(f"[Models] Policy: {'cache-only' if airgapped else 'cache-first; download missing models'}")
 
     print(f"[Start] Launching on http://127.0.0.1:{args.port} ...")
     os.chdir(ROOT_DIR)

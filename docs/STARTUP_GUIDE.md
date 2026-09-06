@@ -135,6 +135,12 @@ bun run dev        # or npm run dev
    VAAKSETU_DEVICE="auto"
    VAAKSETU_GPU_INDEX="0"
 
+   # UI offline mode uses cache first, then downloads missing models once.
+   VAAKSETU_OFFLINE="0"
+
+   # Optional: prohibit downloads for a fully air-gapped machine.
+   VAAKSETU_AIRGAPPED="0"
+
    # Optional: Hugging Face Token (Needed only once if downloading gated Indic models)
    HF_TOKEN="hf_your_token_here"
 
@@ -184,6 +190,12 @@ The local AI microservice handles neural translation (IndicTrans2), Whisper spee
    Open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) in your browser. You should see a JSON response showing system device (`mps`, `cuda`, or `cpu`) and available models.
 
 ### Download models for offline use
+
+The local service uses a cache-first policy. Complete snapshots already in
+`HUGGINGFACE_HUB_CACHE` are reused; missing models may be downloaded once and
+then reused on later runs. The UI's offline mode sets `VAAKSETU_OFFLINE=1` for
+this behavior. Set `VAAKSETU_AIRGAPPED=1` only when all Hub access must be
+prohibited.
 
 Download all translation and transcription models used by the local service on
 an internet-connected machine:

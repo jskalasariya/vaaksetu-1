@@ -85,15 +85,14 @@ if ($depsOk -ne "ok") {
     Write-Host "       $Python -m pip install -r $RootDir\mini-services\requirements.txt"
 }
 
-# Force local model loading for every service process started by this script.
+# Prefer the configured cache. Set VAAKSETU_AIRGAPPED=1 for strict cache-only mode.
 if (-not $env:HUGGINGFACE_HUB_CACHE) {
     $env:HUGGINGFACE_HUB_CACHE = Join-Path $env:USERPROFILE ".cache\huggingface\hub"
 }
 $env:HF_HOME = Split-Path $env:HUGGINGFACE_HUB_CACHE
-$env:HF_HUB_OFFLINE = "1"
-$env:TRANSFORMERS_OFFLINE = "1"
-$env:HF_DATASETS_OFFLINE = "1"
-Write-Host "[Offline] Hugging Face cache: $env:HUGGINGFACE_HUB_CACHE" -ForegroundColor Cyan
+$airgapped = $env:VAAKSETU_AIRGAPPED -and $env:VAAKSETU_AIRGAPPED.ToLower() -in @("1", "true", "yes", "on")
+Write-Host "[Models] Hugging Face cache: $env:HUGGINGFACE_HUB_CACHE" -ForegroundColor Cyan
+Write-Host "[Models] Policy: $(if ($airgapped) { 'cache-only' } else { 'cache-first; download missing models' })" -ForegroundColor Cyan
 $env:VAAKSETU_TTS_MODEL_DIR = if ($env:VAAKSETU_TTS_MODEL_DIR) { $env:VAAKSETU_TTS_MODEL_DIR } else { Join-Path $RootDir "models\tts" }
 Write-Host "[Offline] TTS model directory: $env:VAAKSETU_TTS_MODEL_DIR" -ForegroundColor Cyan
 

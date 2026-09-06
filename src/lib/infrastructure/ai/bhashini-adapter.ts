@@ -19,6 +19,7 @@ import {
   LocalTranslationEngine,
   LocalTranscriptionEngine,
   LocalTtsEngine,
+  LocalLlmEngine,
 } from "./local-adapter";
 import { getAiMode, remoteCredentials } from "./ai-mode";
 import type {
@@ -649,12 +650,17 @@ export const BhashiniLlmEngine: LlmEngine = {
     return "IndicLLM response generated successfully.";
   },
 
-  async answerWithContext(context: string, question: string, replyLang: string): Promise<string> {
+  async answerWithContext(context: string, question: string, replyLang: string, sourceLang = "auto"): Promise<string> {
     const tgt = LANGUAGES[replyLang as "mr" | "hi" | "en"];
     const langInstruction = tgt ? `Reply in ${tgt.name} (${tgt.nativeName}). ` : "";
     const mode = await getAiMode();
+    if (mode === "local") {
+      return LocalLlmEngine.answerWithContext(context, question, replyLang, sourceLang);
+    }
     const apiKey = mode === "remote" ? getGeminiApiKey() : "";
-    if (mode === "remote" && !apiKey) console.warn("[AI mode] Remote selected but GEMINI_API_KEY is missing; using local fallback response.");
+    if (mode === "remote" && !apiKey) {
+      throw new Error("Remote document chat requires GEMINI_API_KEY.");
+    }
 
     if (apiKey) {
       const prompt =
@@ -682,7 +688,7 @@ export const BhashiniLlmEngine: LlmEngine = {
       }
     }
 
-    return `[IndicLLM reply in ${tgt?.name || replyLang}]: Context analyzed successfully.`;
+    throw new Error("Remote document chat did not return an answer.");
   },
 
   async summarize(text: string, opts): Promise<string> {

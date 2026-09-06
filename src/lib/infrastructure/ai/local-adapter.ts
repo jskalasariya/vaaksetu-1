@@ -21,9 +21,13 @@ import type {
   TranslationEngine,
   TranscriptionEngine,
   TtsEngine,
+  LlmEngine,
 } from "./engine-contract";
+import { getAiMode } from "./ai-mode";
 
 const LOCAL_AI_URL = process.env.LOCAL_AI_URL || "http://127.0.0.1:8000";
+
+const getOfflineModelPolicy = async (): Promise<boolean> => (await getAiMode()) === "local";
 
 const localAiConnectionError = (operation: string, error: unknown): Error => {
   const detail = error instanceof Error ? error.message : String(error);
@@ -31,6 +35,52 @@ const localAiConnectionError = (operation: string, error: unknown): Error => {
     `Local AI service unavailable during ${operation} at ${LOCAL_AI_URL}. ` +
       `Start scripts/start-local-ai.ps1 and verify /health. (${detail})`,
   );
+};
+
+export const LocalLlmEngine: LlmEngine = {
+  async complete(): Promise<string> {
+    throw new Error("Local chat completion is only available for document questions.");
+  },
+
+  async answerWithContext(
+    context: string,
+    question: string,
+    replyLang: string,
+    sourceLang = "auto",
+  ): Promise<string> {
+    let res: Response;
+    try {
+      res = await fetch(`${LOCAL_AI_URL}/api/document/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context,
+          question,
+          source_lang: sourceLang,
+          target_lang: replyLang,
+          offline_mode: await getOfflineModelPolicy(),
+        }),
+        signal: AbortSignal.timeout(600_000),
+      });
+    } catch (error) {
+      throw localAiConnectionError("document chat", error);
+    }
+
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Local document chat failed (${res.status}): ${detail}`);
+    }
+
+    const data = await res.json();
+    if (typeof data.answer !== "string" || !data.answer.trim()) {
+      throw new Error("Local document chat returned an empty answer.");
+    }
+    return data.answer.trim();
+  },
+
+  async summarize(): Promise<string> {
+    throw new Error("Local summarization is not available.");
+  },
 };
 
 // Cached device description from the last health check
@@ -78,6 +128,7 @@ export const LocalTranslationEngine: TranslationEngine = {
         source_lang: sourceLang,
         target_lang: targetLang,
         hf_token: process.env.HF_TOKEN || undefined,
+        offline_mode: await getOfflineModelPolicy(),
       }),
       signal: AbortSignal.timeout(600_000), // 10 min — long documents
     });
@@ -128,6 +179,7 @@ export async function translateSegmentsBatched(
       source_lang: sourceLang,
       target_lang: targetLang,
       hf_token: process.env.HF_TOKEN || undefined,
+      offline_mode: await getOfflineModelPolicy(),
     }),
     signal: AbortSignal.timeout(1_200_000), // 20 min — long videos
   });
@@ -167,6 +219,7 @@ export const LocalTranscriptionEngine: TranscriptionEngine = {
           audio_path: audioPath,
           language: language && language !== "auto" ? language : undefined,
           model_size: modelSize,
+          offline_mode: await getOfflineModelPolicy(),
         }),
         signal: AbortSignal.timeout(1_200_000), // 20 min — up to 30 min videos
       });

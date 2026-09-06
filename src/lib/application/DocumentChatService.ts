@@ -59,6 +59,7 @@ export const DocumentChatService = {
       session.documentText ?? "",
       question,
       session.targetLang,
+      session.sourceLang,
     );
 
     let replyAudioPath: string | undefined;

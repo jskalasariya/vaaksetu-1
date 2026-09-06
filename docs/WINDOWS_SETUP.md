@@ -245,6 +245,8 @@ To use a copied USB cache on this laptop:
 
 ```powershell
 $env:HUGGINGFACE_HUB_CACHE = 'E:\vaaksetu-model-cache'
+$env:VAAKSETU_OFFLINE = '0'  # UI mode is propagated per request
+$env:VAAKSETU_AIRGAPPED = '0'  # set '1' for strict cache-only mode
 ```
 
 Set this variable in every PowerShell session before starting the AI service, or
